@@ -21,25 +21,50 @@ def get_totals(graph):
     nodes=get_nodes(graph)
     strength={}
     for i in nodes:
-        strength[i]=sum([graph[edge] for edge in graph if edge[0]==i])+sum([graph[edge] for edge in graph if edge[1]==i])
-    total_weight=sum([strength[i] for i in nodes])
-
-    return strength,total_weight
+        strength[i]=sum([graph[edge] for edge in graph if edge[0]==i or edge[1]==i])
+        # calculate the following way to get same result as net_x_modularity        
+        #strength[i]=sum([graph[edge] for edge in graph if edge[0]==i])+sum([graph[edge] for edge in graph if edge[1]==i])
+    total_strength=sum([strength[i] for i in nodes])
+    total_weight=sum([graph[edge] for edge in graph])
+    return strength,total_weight,total_strength
 
 def modularity(graph,color):
-    Weight=get_weights(graph)    
-    strength,total_weight=get_totals(graph)
-    Q=0
+    nodes=get_nodes(graph)
+    Weight=get_weights(graph)
+    strength,total_weight,total_strength=get_totals(graph)     
+    
+    Q=sum([(strength[i]/total_strength)**2 for i in nodes])
     for edge in Weight:
         i=edge[0]
         j=edge[1]
-        if color[i]==color[j]:
-            x=Weight[edge]-(strength[i]*strength[j]/total_weight)
-            if i==j: 
-                Q=Q+x/total_weight
-            else:
-                Q=Q+2*x/total_weight
+        if color[i]==color[j]: 
+            Q=Q+Weight[edge]/(total_weight)-2*strength[i]*strength[j]/(total_strength**2)
+
     return Q
+
+def net_x_modularity(partition, graph, weight='weight'):
+
+    inc = dict([])
+    deg = dict([])
+    links = graph.size(weight=weight)
+
+    for node in graph:
+        com = partition[node]
+        deg[com] = deg.get(com, 0.) + graph.degree(node, weight=weight)
+        for neighbor, datas in graph[node].items():
+            
+            edge_weight = datas.get(weight, 1)
+            if partition[neighbor] == com:
+                if neighbor == node:
+                    inc[com] = inc.get(com, 0.) + float(edge_weight)
+                else:
+                    inc[com] = inc.get(com, 0.) + float(edge_weight) / 2.
+    res = 0.
+    for com in set(partition.values()):
+        res += (inc.get(com, 0.) / links) - \
+               (deg.get(com, 0.) / (2. * links)) ** 2
+    return res
+
 
 def modulize(graph):
     nodes=get_nodes(graph)
@@ -51,7 +76,7 @@ def modulize(graph):
     
     Weight=get_weights(graph) 
 
-    strength,total_weight=get_totals(graph)
+    strength,total_weight,total_strength=get_totals(graph)
     
     #########################################################
     # color tells us the color of each node
@@ -91,19 +116,19 @@ def modulize(graph):
         # source is the community ID is currently in
         source=color[i]
         # compute the weight of edges between ID and nodes in source community (including itself)
-        T3=weight_in_color[(i,source)]    
+        T3=weight_in_color[(i,source)]/total_weight   
         # compute the expectation 
-        T4=strength[i]*total_weight_of_color[source]/total_weight
+        T4=2*strength[i]*total_weight_of_color[source]/total_strength**2
     
         best_delta=0
         # instead of choosing all possible target colors, rule out the ones ID has no connection to
-        for target in [x for x in set(color.values()) if x!=source]:           
+        for target in [x for x in set(color.values()) if x!=source and weight_in_color[(i,x)]>0]:    #       
             # compute the weight of edges between ID and nodes in target community (including itself)           
-            T1 =weight_in_color[(i,target)]+Weight[(i,i)]
+            T1 =(weight_in_color[(i,target)]+Weight[(i,i)])/total_weight
             # compute the expectation
-            T2 =strength[i]*(strength[i]+total_weight_of_color[target])/total_weight
+            T2 =2*strength[i]*(strength[i]+total_weight_of_color[target])/(total_strength**2)
             # compute the total change if ID moved from source community to target community
-            delta_Q=(T1-T2-T3+T4)*(1/total_weight)    
+            delta_Q=T1-T2-T3+T4
     
             # keep track of the largest
             if delta_Q>best_delta:    
@@ -111,9 +136,10 @@ def modulize(graph):
                 best_target=target
             
         if best_delta>0.00000001:
-    
+            #print(modularity(graph,color)+best_delta)
             color[i]=best_target
-    
+            #print(modularity(graph,color))
+            #print()
             # update the total_similarity of source
             total_weight_of_color[source]=total_weight_of_color[source]-strength[i]
             # update the total_similarity of target        
